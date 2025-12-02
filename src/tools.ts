@@ -2,36 +2,12 @@
  * Tool definitions for the AI chat agent
  * Tools can either require human confirmation or execute automatically
  */
-import { tool, type ToolSet } from "ai";
+import { streamText, tool, type ToolSet } from "ai";
 import { z } from "zod/v3";
 
 import type { Chat } from "./server";
 import { getCurrentAgent } from "agents";
 import { scheduleSchema } from "agents/schedule";
-
-/**
- * Weather information tool that requires human confirmation
- * When invoked, this will present a confirmation dialog to the user
- */
-const getWeatherInformation = tool({
-  description: "show the weather in a given city to the user",
-  inputSchema: z.object({ city: z.string() })
-  // Omitting execute function makes this tool require human confirmation
-});
-
-/**
- * Local time tool that executes automatically
- * Since it includes an execute function, it will run without user confirmation
- * This is suitable for low-risk operations that don't need oversight
- */
-const getLocalTime = tool({
-  description: "get the local time for a specified location",
-  inputSchema: z.object({ location: z.string() }),
-  execute: async ({ location }) => {
-    console.log(`Getting local time for ${location}`);
-    return "10am";
-  }
-});
 
 const scheduleTask = tool({
   description: "A tool to schedule a task to be executed at a later time",
@@ -109,15 +85,65 @@ const cancelScheduledTask = tool({
 });
 
 /**
+ * Tool for getting reddit pages for a restaurants
+ */
+const getRedditReccs = tool({
+  description: "Look for community recommendations for restaurants in a city by looking through reddit posts, returns a descriptive list of restaurants",
+  inputSchema: z.object({
+    city: z.string().describe("City to look for restaurants in")
+  }),
+  execute: async({city},env) =>{
+    const {agent} = getCurrentAgent<Chat>();
+    
+   try{
+      const url = `https://www.reddit.com/search.json?q=%22best+restaurant%22+${encodeURIComponent(city)}&limit=10&type=posts&sort=relevance&t=all`
+      const res = await fetch(url,{
+        headers: {
+        "User-Agent": "script by u/tea-kettle5",
+        "Accept": "application/json"
+        }}
+      );
+      const data = await res.json() as any;
+      const rlist = data.data.children.map((p: { data: { title: any; subreddit: any; id: any; }; })  => ({
+        title: p.data.title.replaceAll(" ","_").toLowerCase().replace(/[^a-zA-Z0-9_\s]/g, ''),
+        subreddit: p.data.subreddit,
+        id: p.data.id
+      }));
+      
+      let bodys =new Map<string,Array<String>>();
+      for (const i of rlist){
+        const url = `https://www.reddit.com/r/${i.subreddit}/comments/${i.id}/${i.title}.json?sort=top&limit=30`
+        const res = await fetch(url,{
+           headers: {
+           "User-Agent": "script by u/tea-kettle5",
+           "Accept": "application/json"
+           }});
+            const data = await res.json() as any;
+          const arr =[data[0].data.children[0].data.selftext,data[1].data.children.slice(0,-1).map((p: { data:{body:string}; })  => (p.data.body))];
+          bodys.set(i.title,arr);
+      } 
+      const obj = Object.fromEntries(bodys)
+      const jsonString = JSON.stringify(obj)
+      const response =  await agent?.runPrompt("You are a helpful assistent that can analyze and extract text from strings",
+        "Examine the text and determine which 5 restaurants are mentioned weighing both by most positive mentions and return a resonse as a list"+jsonString
+      );
+      console.log(response);
+      return response
+    }catch(e){
+      console.error(e);
+      return `error getting reddit recommendations: ${e}`
+    }
+  }
+});
+/**
  * Export all available tools
  * These will be provided to the AI model to describe available capabilities
  */
 export const tools = {
-  getWeatherInformation,
-  getLocalTime,
   scheduleTask,
   getScheduledTasks,
-  cancelScheduledTask
+  cancelScheduledTask,
+  getRedditReccs
 } satisfies ToolSet;
 
 /**

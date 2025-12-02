@@ -13,12 +13,12 @@ import {
   createUIMessageStreamResponse,
   type ToolSet
 } from "ai";
-import { createWorkersAI } from 'workers-ai-provider';
+import { createWorkersAI, type WorkersAI } from 'workers-ai-provider';
 import { processToolCalls, cleanupMessages } from "./utils";
 import { tools, executions } from "./tools";
 import { env } from "cloudflare:workers";
 const workersai = createWorkersAI({ binding: env.AI });
-const model = workersai("@cf/meta/llama-3.1-8b-instruct-fp8")
+const model = workersai("@cf/meta/llama-3.2-3b-instruct")
 
 // Cloudflare AI Gateway
 // const openai = createOpenAI({
@@ -30,6 +30,16 @@ const model = workersai("@cf/meta/llama-3.1-8b-instruct-fp8")
  * Chat Agent implementation that handles real-time AI chat interactions
  */
 export class Chat extends AIChatAgent<Env> {
+  async runPrompt(system:string,message:any){
+    const messages= [{ role: "system", content: system },
+      {
+        role:"user",
+        content: message,
+      },]
+    const response = await env.AI.run("@cf/meta/llama-3.1-8b-instruct-fp8",
+      {messages});
+      return response.response
+  }
   /**
    * Handles incoming chat messages and manages the response stream
    */
@@ -43,8 +53,7 @@ export class Chat extends AIChatAgent<Env> {
 
     // Collect all tools, including MCP tools
     const allTools = {
-      ...tools,
-      ...this.mcp.getAITools()
+      ...tools
     };
 
     const stream = createUIMessageStream({
@@ -111,19 +120,6 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
  */
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext) {
-    const url = new URL(request.url);
-
-    if (url.pathname === "/check-open-ai-key") {
-      const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
-      return Response.json({
-        success: hasOpenAIKey
-      });
-    }
-    if (!process.env.OPENAI_API_KEY) {
-      console.error(
-        "OPENAI_API_KEY is not set, don't forget to set it locally in .dev.vars, and use `wrangler secret bulk .dev.vars` to upload it to production"
-      );
-    }
     return (
       // Route the request to our agent or return 404 if not found
       (await routeAgentRequest(request, env)) ||
