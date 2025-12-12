@@ -126,6 +126,7 @@ const getRedditReccs = tool({
           bodys.set(i.title,arr);
       } 
       const obj = Object.fromEntries(bodys)
+      count =4
       const jsonString = JSON.stringify(obj)
       const response =  await agent?.runPrompt("You are a helpful assistent that can analyze and extract text from strings",
         "Examine the text and determine which 5 restaurants are mentioned weighing both by most positive mentions and return a resonse as a list"+jsonString
